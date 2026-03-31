@@ -1,3 +1,9 @@
+namespace bear {
+    void kernel_main() {
+        asm volatile ("jmp $");
+    }
+}
+
 extern "C" void kmain() {
-    asm volatile ("hlt");
+    bear::kernel_main();
 }
