@@ -1,0 +1,85 @@
+version: 10.2
+variables:
+  CXX_COMPILER: "/usr/bin/clang++"
+  CXX_FLAGS: "-I/usr/include/efi -I/usr/include/efi/x86_64 -I${PROJECT_DIRECTORY}/include -fno-stack-protector \
+              -fshort-wchar -mno-red-zone -ffreestanding -fno-rtti \
+              -fno-exceptions -std=c++23 -O0 -g -fno-omit-frame-pointer"
+  LINKER_FLAGS: "-T linker.ld"
+  CXX: "${CXX_COMPILER} ${CXX_FLAGS}"
+  ASM_COMPILER: "/usr/bin/nasm"
+
+  AUTOGEN_PREFIX: "autogen_"
+
+  BINOUT: "${PROJECT_DIRECTORY}/bin"
+  OBJOUT: "${PROJECT_DIRECTORY}/.obj"
+  CXXSRCDIR: "${PROJECT_DIRECTORY}/src/cpp"
+  ASMSRCDIR: "${PROJECT_DIRECTORY}/src/asm"
+  # Sources
+  # -- Bootloader --
+  BL_SRC_1: "${CXXSRCDIR}/boot/main.cpp"
+  BL_OBJ_1: "${OBJOUT}/boot_main.cpp.o"
+  BL_OBJs: "${mpy_exec scripts/find_obj_files.sh BOOTLOADER_CXX}"
+  # -- Kernel --
+  KR_SRC_1: "${CXXSRCDIR}/kernel/main.cpp"
+  KR_OBJ_1: "${mpy_exec scripts/objify_src_files.sh}"
+  KR_SRC_2: "${CXXSRCDIR}/kernel/system/journaling.cpp"
+  KR_OBJ_2: "${OBJOUT}/kernel_system_journaling.cpp.o"
+  KR_SRC_3: "${CXXSRCDIR}/kernel/system/memory.cpp"
+  KR_OBJ_3: "${OBJOUT}/kernel_system_memory.cpp.o"
+  KR_OBJs: "${mpy_exec scripts/find_obj_files.sh KERNEL_CXX}"
+  # -- Common --
+  CM_SRC_1: "${CXXSRCDIR}/common/sgr.cpp"
+  CM_OBJ_1: "${OBJOUT}/common_sgr_cpp.o"
+  CM_SRC_2: "${CXXSRCDIR}/common/string.cpp"
+  CM_OBJ_2: "${OBJOUT}/common_string_cpp.o"
+  CM_OBJs: "${mpy_exec scripts/find_obj_files.sh COMMON}"
+
+tasks:
+  prepare_directories:
+    commands:
+      - "mkdir -p ${BINOUT}"
+      - "mkdir -p ${OBJOUT}"
+  compile_common:
+    commands:
+      - "${CXX} -fpic -c ${CM_SRC_1} -o ${CM_OBJ_1}"
+      - "${CXX} -fpic -c ${CM_SRC_2} -o ${CM_OBJ_2}"
+  compile_kernel:
+    commands:
+      - "${CXX} -fno-pic -c ${KR_SRC_1} -o ${KR_OBJ_1}"
+      - "${CXX} -fno-pic -c ${KR_SRC_2} -o ${KR_OBJ_2}"
+      - "${CXX} -fno-pic -c ${KR_SRC_3} -o ${KR_OBJ_3}"
+  link_kernel:
+    commands: 
+      - "ld.lld ${LINKER_FLAGS} --oformat=binary \
+         ${KR_OBJs} ${CM_OBJs} -o ${BINOUT}/kernel.bin"
+      - "ld.lld ${LINKER_FLAGS} \
+         ${KR_OBJs} ${CM_OBJs} -o ${BINOUT}/kernel.elf"
+  combine: # Bootloader includes kernel.bin.h
+    commands:
+      - "xxd -n kernel -i ${BINOUT}/kernel.bin > ${PROJECT_DIRECTORY}/include/binary/kernel.bin.h"
+  compile_bootloader:
+    commands:
+      - "${CXX} -c ${BL_SRC_1} -o ${BL_OBJ_1}"
+  link_bootloader:
+    commands: ["ld.lld -nostdlib -znocombreloc -T /usr/lib/elf_x86_64_efi.lds -shared -Bsymbolic -L/usr/lib -lefi -lgnuefi \
+                /usr/lib/crt0-efi-x86_64.o ${CM_OBJs} ${BL_OBJs} -o ${OBJOUT}/bootloader.so"]
+  make_efi:
+    commands: ["objcopy -j .text -j .sdata -j .data -j .dynamic -j .dynsym -j .rel -j .rela -j .reloc \
+                --target=efi-app-x86_64 ${OBJOUT}/bootloader.so ${BINOUT}/BOOTX64.efi"]
+  make_img:
+    commands:
+      - "dd if=/dev/zero of=${BINOUT}/Disk.img bs=64M count=1"
+      - "mkfs.vfat -F 32 ${BINOUT}/Disk.img"
+      - "mmd -i ${BINOUT}/Disk.img ::EFI"
+      - "mmd -i ${BINOUT}/Disk.img ::EFI/BOOT"
+      - "mcopy -i ${BINOUT}/Disk.img ${BINOUT}/BOOTX64.efi ::EFI/BOOT/"
+  verify_kernel_elf:
+    commands:
+      - "readelf --file-header ${BINOUT}/kernel.elf"
+  boot:
+    commands: ["qemu-system-x86_64 \
+                -enable-kvm \
+                -smp cpus=2 -m 1G \
+                -serial /dev/pts/4 \
+                -bios ./UEFI/OVMF.4m.fd \
+                -drive format=raw,file=${BINOUT}/Disk.img"]
