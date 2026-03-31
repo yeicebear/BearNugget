@@ -1,0 +1,12 @@
+CompileFlags:
+  Add: [-I/usr/include/efi,
+        -I/usr/include/efi/x86_64,
+        -I/home/noerlol/LowLevel-Projects/OperatingSystems/microOS/include,
+        -fno-stack-protector,
+        -fno-pic,
+        -fshort-wchar,
+        -mno-red-zone,
+        -ffreestanding,
+        -fno-rtti,
+        -fno-exceptions,
+        -std=c++23]
