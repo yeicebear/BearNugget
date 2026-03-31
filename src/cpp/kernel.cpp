@@ -1,6 +1,6 @@
 namespace bear {
     void kernel_main() {
-        asm volatile ("jmp $");
+        // asm volatile ("jmp $");
     }
 }
 
